@@ -3,7 +3,9 @@ package main
 import (
 	"errors"
 	"fmt"
+	"log"
 	"strconv"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/data/binding"
@@ -86,37 +88,59 @@ func makeForm() *widget.Form {
 	form := widget.NewForm()
 
 	workMinutesBinding := binding.NewInt()
-	_ = workMinutesBinding.Set(myPref.workMinutes)
+	if err := workMinutesBinding.Set(myPref.workMinutes); err != nil {
+		log.Println("Error setting workMinutesBinding: ", err)
+	}
 	form.AppendItem(newIntegerFormItem(workMinutesBinding, "Work duration in minutes", "Default is: %d minutes.  ", NewRangeValidator(0, 999)))
 
 	breakMinutesBinding := binding.NewInt()
-	_ = breakMinutesBinding.Set(myPref.breakMinutes)
+	if err := breakMinutesBinding.Set(myPref.breakMinutes); err != nil {
+		log.Println("Error setting breakMinutesBinding: ", err)
+	}
 	form.AppendItem(newIntegerFormItem(breakMinutesBinding, "Break duration in minutes", "Default is: %d minutes.  ", NewRangeValidator(0, 999)))
 
 	forceWindowFocusDurationBinding := binding.NewInt()
-	_ = forceWindowFocusDurationBinding.Set(myPref.forceWindowFocusDuration)
+	if err := forceWindowFocusDurationBinding.Set(myPref.forceWindowFocusDuration); err != nil {
+		log.Println("Error setting forceWindowFocusDurationBinding: ", err)
+	}
 	form.AppendItem(newIntegerFormItem(forceWindowFocusDurationBinding, "Force Window Focus in seconds", "Default is: %d seconds.  ", NewRangeValidator(0, 999)))
 
+	label := widget.NewLabel("")
+	formItem := widget.NewFormItem("Left Time Duration in seconds", label)
+	label.Bind(leftTimeDurationBinding)
+	form.AppendItem(formItem)
+
 	form.OnSubmit = func() {
+		disableAllTimers()
 		workMinutes, _ := workMinutesBinding.Get()
 		breakMinutes, _ := breakMinutesBinding.Get()
 		forceWindowFocusDuration, _ := forceWindowFocusDurationBinding.Get()
-
 		newPref := Pref{
 			workMinutes,
 			breakMinutes,
 			forceWindowFocusDuration,
 		}
 		Save(newPref)
+		time.Sleep(time.Second)
+		loadSetting()
+		go startWorkTimer()
 	}
 
 	return form
 }
 
 func newIntegerFormItem(bind binding.Int, entryText string, hintText string, validator fyne.StringValidator) *widget.FormItem {
-	value, _ := bind.Get()
-	entry := newIntegerEntryWithData(binding.IntToString(bind))
-	entry.Validator = validator
+	value, err := bind.Get()
+	if err != nil {
+		log.Println("Error getting value: ", err)
+	}
+	entryData := binding.IntToString(bind)
+	entry := newIntegerEntryWithData(entryData)
+	// it should be a fyne bug
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		entry.Validator = validator
+	}()
 	formItem := widget.NewFormItem(entryText, entry)
 	formItem.HintText = fmt.Sprintf(hintText, value)
 	return formItem

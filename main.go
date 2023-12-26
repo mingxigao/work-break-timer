@@ -16,6 +16,7 @@ import (
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/data/binding"
 	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/systray"
 
@@ -42,7 +43,8 @@ var (
 	//go:embed notification.wav
 	soundFile []byte
 	//go:embed app-icon.png
-	systrayIcon []byte
+	systrayIcon             []byte
+	leftTimeDurationBinding = binding.NewString()
 )
 
 func main() {
@@ -58,7 +60,8 @@ func main() {
 	a.Lifecycle().SetOnExitedForeground(func() {
 		if !forceWindowFocusRunning {
 			forceWindowFocusRunning = true
-			time.Sleep(time.Second * time.Duration(forceWindowFocusSeconds))
+			tick := time.Tick(time.Second * time.Duration(forceWindowFocusSeconds))
+			<-tick
 			if breaking {
 				w.RequestFocus()
 			}
@@ -85,9 +88,8 @@ func main() {
 	w.Resize(fyne.NewSize(1000, 600))
 	w.SetContent(container.NewStack(rectangle, container.NewGridWithRows(2, container.NewBorder(nil, reminderText, nil, nil), container.NewBorder(timerText, nil, nil, nil))))
 	// w.SetFullScreen(true) //  not work well
-
+	loadSetting()
 	go startWorkTimer()
-
 	a.Run()
 }
 
@@ -96,30 +98,32 @@ func makeMenu() *fyne.Menu {
 		fyne.NewMenuItem("Enable", func() {
 			startWorkTimer()
 		}),
-		fyne.NewMenuItem("Disable", func() {
-			disableSystrayTimer()
-			if working {
-				go stopWorkTimer()
-				return
-			}
-
-			if breaking {
-				go stopBreakTimer()
-				return
-			}
-		}),
+		fyne.NewMenuItem("Disable", disableAllTimers),
 		fyne.NewMenuItemSeparator(),
 		fyne.NewMenuItem("Settings...", func() {
 			settings := NewSettings()
-			settings.SetOnSubmit(func() {
-				newPref := Load()
-				workSeconds = newPref.workMinutes * 60
-				breakSeconds = newPref.breakMinutes * 60
-				forceWindowFocusSeconds = newPref.forceWindowFocusDuration
-			})
+			settings.SetOnSubmit(loadSetting)
 			settings.Show()
 		}),
 	)
+}
+func disableAllTimers() {
+	disableSystrayTimer()
+	if working {
+		go stopWorkTimer()
+		return
+	}
+
+	if breaking {
+		go stopBreakTimer()
+		return
+	}
+}
+func loadSetting() {
+	newPref := Load()
+	workSeconds = newPref.workMinutes * 60
+	breakSeconds = newPref.breakMinutes * 60
+	forceWindowFocusSeconds = newPref.forceWindowFocusDuration
 }
 
 func setupSystemTrayMenu(desk desktop.App) {
@@ -131,27 +135,35 @@ func setupSystemTrayMenu(desk desktop.App) {
 }
 
 func startWorkTimer() {
+	if working {
+		return
+	}
+	log.Println("startWorkTimer")
 	duration := workSeconds
 	working = true
 	breaking = false
 
-	a.SendNotification(fyne.NewNotification(fmt.Sprintf("No.%d Start Work Timer", getWorkRoundCounter()+1), "Start Work Timer"))
+	a.SendNotification(fyne.NewNotification("", fmt.Sprintf("No.%d Start Work Timer", getWorkRoundCounter()+1)))
 	w.Hide()
 
+	tick := time.Tick(1 * time.Second)
+
+	updateSystrayTimer(duration)
 	for {
+		if err := leftTimeDurationBinding.Set(formatTime(duration)); err != nil {
+			log.Println(err)
+		}
+		<-tick
 		if !working {
 			return
 		}
-		updateSystrayTimer(workSeconds - duration)
-		if duration == 0 {
+		if duration <= 0 {
 			setWorkRoundCounter()
 			stopWorkTimer()
 			startBreakTimer()
 			return
 		}
 		duration--
-		time.Sleep(time.Second)
-		// log.Println("tick", "Number of goroutines:", runtime.NumGoroutine())
 	}
 }
 
@@ -167,14 +179,15 @@ func stopBreakTimer() {
 }
 
 func startBreakTimer() {
-	// log.Println("start break ticker")
 	disableSystrayTimer()
-	a.SendNotification(fyne.NewNotification("Start Break Timer", "Start Break Timer"))
+	// a.SendNotification(fyne.NewNotification("", "Start Break Timer"))
 	w.Show()
 
 	duration := breakSeconds
 	breaking = true
+	tick := time.Tick(1 * time.Second)
 	for {
+		<-tick
 		if !breaking {
 			return
 		}
@@ -186,14 +199,13 @@ func startBreakTimer() {
 		timerText.Text = formatTime(duration)
 		timerText.Refresh()
 		duration--
-		time.Sleep(time.Second)
 	}
 }
 
 func updateSystrayTimer(d int) {
 	str := formatTime(d)
 	systray.SetTitle(appName + str)
-	// systray.SetTooltip(fmt.Sprintf("%s%s", appName, str))
+	systray.SetTooltip(fmt.Sprintf("%s%s", appName, str))
 }
 
 func disableSystrayTimer() {
