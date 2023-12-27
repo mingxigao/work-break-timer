@@ -191,13 +191,13 @@ func startBreakTimer() {
 		if !breaking {
 			return
 		}
+		timerText.Text = formatTime(duration)
+		timerText.Refresh()
 		if duration == 0 {
 			stopBreakTimer()
 			go startWorkTimer()
 			return
 		}
-		timerText.Text = formatTime(duration)
-		timerText.Refresh()
 		duration--
 	}
 }
